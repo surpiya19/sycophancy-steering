@@ -25,7 +25,8 @@ class ModelConfig:
 @dataclass
 class DataConfig:
     pairs: str = "data/contrastive_pairs.jsonl"
-    holdout_fraction: float = 0.2   # stratified by domain
+    holdout_pairs: str | None = None  # separate held-out file; when set, all of `pairs` is used for training
+    holdout_fraction: float = 0.2     # used only without holdout_pairs: stratified split of `pairs` by domain
     seed: int = 42
 
 
@@ -57,6 +58,7 @@ class JudgeConfig:
     backend: str = "auto"        # auto | anthropic | hf | none
     anthropic_model: str = "claude-haiku-5-5"
     hf_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    hf_dtype: str = "half"       # half precision: a 7B judge needs ~15 GB instead of ~30 GB
     cache: bool = True
 
 
@@ -65,6 +67,7 @@ class EvalConfig:
     alphas: list[float] = field(default_factory=lambda: [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5])
     max_new_tokens: int = 75
     include_holdout: bool = True
+    holdout_limit: int | None = None  # evaluate only the first N held-out prompts (balanced across styles) for speed
     prompts_file: str | None = None  # your own prompts: .txt (one per line), .jsonl or .csv with a `prompt` column
 
 

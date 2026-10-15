@@ -37,15 +37,15 @@ def _artifacts(cfg):
 
 
 def cmd_extract(args):
-    from .data import load_pairs, stratified_split
+    from .data import make_splits
     from .extraction import direct_token_effects, extract, layer_separation, write_extraction_report
     from .plotting import plot_layer_sweep, plot_separation
 
     cfg, lm = _load(args)
-    pairs = load_pairs(cfg.resolve_path(cfg.data.pairs))
-    train, holdout = stratified_split(pairs, cfg.data.holdout_fraction, cfg.data.seed)
-    print(f"[+] {len(pairs)} pairs · {len(train)} train · {len(holdout)} held out "
-          f"({len({p.domain for p in pairs})} domains, stratified)")
+    train, holdout = make_splits(cfg)
+    styles = sorted({p.style for p in holdout})
+    how = f"separate file {cfg.data.holdout_pairs}" if cfg.data.holdout_pairs else "stratified split by domain"
+    print(f"[+] {len(train)} train pairs · {len(holdout)} held out ({how}; styles: {', '.join(styles)})")
     art = extract(lm, train, holdout, cfg.extraction.batch_size, cfg.extraction.max_norm_samples)
     out = cfg.artifact_dir
     out.mkdir(parents=True, exist_ok=True)
@@ -62,16 +62,19 @@ def cmd_extract(args):
 
 
 def cmd_evaluate(args):
-    from .data import load_pairs, stratified_split
+    from .data import make_splits
     from .evaluation import build_eval_prompts, run_alpha_sweep, save_eval, summarize
     from .judges import make_judge
     from .plotting import plot_dose_response
 
     cfg, lm = _load(args)
     art = _artifacts(cfg)
-    pairs = {p.id: p for p in load_pairs(cfg.resolve_path(cfg.data.pairs))}
+    train, holdout_now = make_splits(cfg)
+    pairs = {p.id: p for p in train + holdout_now}
     holdout_ids = [pid for pid, h in zip(art.pair_ids, art.is_holdout.tolist()) if h]
     holdout = [pairs[i] for i in holdout_ids if i in pairs]
+    if len(holdout) != len(holdout_ids):
+        raise SystemExit("The held-out pairs changed since `steerlab extract`; re-run extract first.")
     prompts = build_eval_prompts(cfg, holdout, args.prompts)
     print(f"[+] Evaluating {len(prompts)} prompts at α ∈ {cfg.eval.alphas}")
     judge = make_judge(cfg, cfg.artifact_dir)

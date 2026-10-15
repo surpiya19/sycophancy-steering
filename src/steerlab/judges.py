@@ -89,10 +89,18 @@ class AnthropicJudge(Judge):
 
 
 class HFJudge(Judge):
-    def __init__(self, model_id: str, device: str = "auto"):
+    def __init__(self, model_id: str, device: str = "auto", dtype: str = "half"):
         from .modeling import load_model  # local import keeps the steered model's module light
-        print(f"[*] Loading judge model {model_id} (separate from the steered model)...")
-        self.lm = load_model(model_id, device=device)
+        print(f"[*] Loading judge model {model_id} ({dtype} precision, separate from the steered model)...")
+        try:
+            self.lm = load_model(model_id, dtype=dtype, device=device)
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                raise RuntimeError(
+                    f"Not enough memory to load the judge {model_id}. Use a smaller judge "
+                    f"(--set judge.hf_model=Qwen/Qwen2.5-3B-Instruct), Claude (set ANTHROPIC_API_KEY and "
+                    f"--set judge.backend=anthropic), or skip it (--set judge.backend=none).") from e
+            raise
         self.name = f"hf:{model_id}"
         self.letter_ids: dict[str, list[int]] = {}
         for letter in "ABC":
@@ -158,7 +166,7 @@ def make_judge(cfg, cache_dir: Path | None = None) -> Judge:
         backend = "anthropic" if os.environ.get("ANTHROPIC_API_KEY") else "hf"
     if backend == "none":
         return NullJudge()
-    judge = AnthropicJudge(cfg.judge.anthropic_model) if backend == "anthropic" else HFJudge(cfg.judge.hf_model, cfg.model.device)
+    judge = AnthropicJudge(cfg.judge.anthropic_model) if backend == "anthropic" else HFJudge(cfg.judge.hf_model, cfg.model.device, cfg.judge.hf_dtype)
     if cfg.judge.cache and cache_dir is not None:
         judge = CachedJudge(judge, Path(cache_dir) / "judge_cache.jsonl")
     return judge

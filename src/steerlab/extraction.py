@@ -38,6 +38,7 @@ class SteeringArtifacts:
     syc_proj: torch.Tensor           # [N, L]
     prompt_proj: torch.Tensor        # [N, L] last prompt token projection (the "pre-bias" reading)
     meta: dict = field(default_factory=dict)
+    styles: list[str] = field(default_factory=list)  # per pair: standard | style_swapped
 
     # -------- steering helpers
     def vector(self, layer: int) -> torch.Tensor:
@@ -73,7 +74,9 @@ class SteeringArtifacts:
     def load(cls, path: str | Path) -> "SteeringArtifacts":
         if not Path(path).exists():
             raise FileNotFoundError(f"No vectors at {path}. Run `steerlab extract` first.")
-        return cls(**torch.load(path, map_location="cpu", weights_only=False))
+        data = torch.load(path, map_location="cpu", weights_only=False)
+        data.setdefault("styles", ["standard"] * len(data["pair_ids"]))  # files from before styles existed
+        return cls(**data)
 
 
 # --------------------------------------------------------------------------- batching
@@ -174,6 +177,7 @@ def extract(lm: LoadedModel, train: list[Pair], holdout: list[Pair], batch_size:
         is_holdout=torch.tensor([False] * len(train) + [True] * len(holdout)),
         honest_proj=proj["honest"], syc_proj=proj["syc"], prompt_proj=prompt_proj,
         meta={"n_train": len(train), "n_holdout": len(holdout)},
+        styles=[p.style for p in everyone],
     )
 
 
@@ -190,7 +194,13 @@ def auroc(pos: np.ndarray, neg: np.ndarray) -> float:
 def layer_separation(art: SteeringArtifacts) -> pd.DataFrame:
     """Per-layer separation on held-out pairs (and train, for comparison)."""
     rows = []
-    for split, mask in (("holdout", art.is_holdout), ("train", ~art.is_holdout)):
+    styles = np.array(art.styles or ["standard"] * len(art.pair_ids))
+    hold = art.is_holdout.numpy()
+    splits = [("holdout", art.is_holdout), ("train", ~art.is_holdout)]
+    held_styles = sorted(set(styles[hold]))
+    if len(held_styles) > 1:  # e.g. holdout[standard] vs holdout[style_swapped]: does tone drive the score?
+        splits += [(f"holdout[{s}]", torch.from_numpy(hold & (styles == s))) for s in held_styles]
+    for split, mask in splits:
         for layer in range(art.num_layers):
             h = art.honest_proj[mask, layer].numpy()
             s = art.syc_proj[mask, layer].numpy()
@@ -239,6 +249,12 @@ def write_extraction_report(art: SteeringArtifacts, sep: pd.DataFrame, out_dir: 
         "best_layer_by_holdout_auroc": best,
         "best_layer_holdout_auroc": float(hold.loc[best, "auroc"]),
     }
+    for split in sorted(s for s in sep.split.unique() if s.startswith("holdout[")):
+        sub = sep[sep.split == split].set_index("layer")
+        style = split[len("holdout["):-1]
+        summary[f"steering_layer_auroc_{style}"] = float(sub.loc[chosen_layer, "auroc"])
+        summary[f"steering_layer_pairwise_accuracy_{style}"] = float(sub.loc[chosen_layer, "pairwise_accuracy"])
+        summary[f"n_holdout_{style}"] = int(sum(1 for s, h in zip(art.styles, art.is_holdout.tolist()) if h and s == style))
     if direct is not None:
         summary["direct_path_promoted"] = [t for t, _ in direct[0]]
         summary["direct_path_suppressed"] = [t for t, _ in direct[1]]

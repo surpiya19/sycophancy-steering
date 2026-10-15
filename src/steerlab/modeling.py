@@ -62,6 +62,8 @@ def resolve_device(name: str) -> torch.device:
 def resolve_dtype(name: str, device: torch.device) -> torch.dtype:
     if name == "auto":
         return torch.bfloat16 if device.type == "cuda" else torch.float32
+    if name == "half":  # half-size weights on any accelerator; CPU stays float32
+        return {"cuda": torch.bfloat16, "mps": torch.float16}.get(device.type, torch.float32)
     return {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[name]
 
 

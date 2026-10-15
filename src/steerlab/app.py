@@ -85,9 +85,12 @@ def build_app(lm, art: SteeringArtifacts, cfg, artifact_dir: Path | None = None)
         verdict_lines = [f"**Internal readout:** steered reply is {delta:+.2f} on the score scale vs baseline "
                          f"({'more sycophantic' if delta > 0.1 else 'more honest' if delta < -0.1 else 'about the same'})."]
         if use_judge:
-            j = get_judge()
-            vb, vs = j.judge(prompt, base.text), j.judge(prompt, steered.text)
-            verdict_lines.append(f"**Judge ({j.name}):** baseline → `{vb}`, steered → `{vs}`")
+            try:
+                j = get_judge()
+                vb, vs = j.judge(prompt, base.text), j.judge(prompt, steered.text)
+                verdict_lines.append(f"**Judge ({j.name}):** baseline → `{vb}`, steered → `{vs}`")
+            except Exception as e:  # e.g. not enough memory for the judge model
+                verdict_lines.append(f"**Judge unavailable:** {e}")
         verdict_md = "\n\n".join(verdict_lines)
 
         return (audit_md,
@@ -110,7 +113,12 @@ def build_app(lm, art: SteeringArtifacts, cfg, artifact_dir: Path | None = None)
         base = generate(lm, art, texts, spec(0.0), **kw)
         steered = generate(lm, art, texts, spec(alpha), **kw)
         rows = []
-        j = get_judge() if use_judge else None
+        j = None
+        if use_judge:
+            try:
+                j = get_judge()
+            except Exception as e:
+                gr.Warning(f"Judge unavailable, continuing without it: {e}")
         for p, b, st in zip(prompts, base, steered):
             row = {"prompt": p.prompt, "tactics": ", ".join(auditor.detect(p.prompt)) or "",
                    "baseline_reply": b.text, "baseline_score": round(b.mean_score, 3),

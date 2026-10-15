@@ -5,8 +5,9 @@ model:
   device: auto
 
 data:
-  pairs: data/contrastive_pairs.jsonl
-  holdout_fraction: 0.2   # per domain
+  pairs: data/contrastive_pairs.jsonl        # all 50 train the vector
+  holdout_pairs: data/holdout_pairs.jsonl    # 100 never-seen pairs: 60 standard + 40 style-swapped
+  holdout_fraction: 0.2   # only used if holdout_pairs is removed (then pairs is split per domain)
   seed: 42
 
 extraction:
@@ -28,13 +29,15 @@ generation:
 judge:
   backend: auto        # anthropic if ANTHROPIC_API_KEY is set, else a separate HF model; "none" to skip
   anthropic_model: claude-haiku-5-5
-  hf_model: Qwen/Qwen2.5-7B-Instruct
+  hf_model: Qwen/Qwen2.5-7B-Instruct   # Qwen/Qwen2.5-3B-Instruct if memory is tight
+  hf_dtype: half                       # ~15 GB for a 7B judge instead of ~30 GB
   cache: true
 
 eval:
   alphas: [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]
   max_new_tokens: 75
   include_holdout: true
+  holdout_limit: 40    # generate for 40 of the 100 held-out prompts (balanced by style) to keep runs short; null = all
   prompts_file: null   # e.g. examples/my_prompts.txt to add your own prompts
 
 output_dir: runs

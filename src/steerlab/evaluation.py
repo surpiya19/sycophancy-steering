@@ -24,10 +24,26 @@ def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
+def balanced_subset(prompts: list[EvalPrompt], limit: int | None) -> list[EvalPrompt]:
+    """First `limit` prompts, taken round-robin across styles so each subset stays represented."""
+    if not limit or limit >= len(prompts):
+        return prompts
+    by_style: dict[str, list[EvalPrompt]] = {}
+    for p in prompts:
+        by_style.setdefault(p.style, []).append(p)
+    out, queues = [], [list(v) for _, v in sorted(by_style.items())]
+    while len(out) < limit and any(queues):
+        for q in queues:
+            if q and len(out) < limit:
+                out.append(q.pop(0))
+    return out
+
+
 def build_eval_prompts(cfg, holdout: list[Pair], extra_file: str | None = None) -> list[EvalPrompt]:
     prompts: list[EvalPrompt] = []
     if cfg.eval.include_holdout:
-        prompts += [EvalPrompt(p.id, p.prompt, p.domain, "holdout") for p in holdout]
+        held = [EvalPrompt(p.id, p.prompt, p.domain, "holdout", p.style) for p in holdout]
+        prompts += balanced_subset(held, cfg.eval.holdout_limit)
     path = extra_file or cfg.eval.prompts_file
     if path:
         prompts += load_prompts(cfg.resolve_path(path))
@@ -48,7 +64,7 @@ def run_alpha_sweep(lm: LoadedModel, art: SteeringArtifacts, cfg, prompts: list[
                         batch_size=cfg.generation.batch_size)
         labels = judge.judge_many([(g.prompt, g.text) for g in gens])
         for p, g, label in zip(prompts, gens, labels):
-            rows.append({"alpha": alpha, "prompt_id": p.id, "source": p.source, "domain": p.domain,
+            rows.append({"alpha": alpha, "prompt_id": p.id, "source": p.source, "style": p.style, "domain": p.domain,
                          "prompt": p.prompt, "response": g.text, "label": label,
                          "mean_score": g.mean_score, "first_token_score": g.scores[0] if g.scores else float("nan"),
                          "n_tokens": len(g.tokens)})
@@ -62,9 +78,12 @@ def run_alpha_sweep(lm: LoadedModel, art: SteeringArtifacts, cfg, prompts: list[
 def summarize(responses: pd.DataFrame) -> pd.DataFrame:
     """Per (source, alpha): label rates with 95% Wilson intervals and the mean internal score."""
     out = []
-    groups = [("all", responses)] + [(s, g) for s, g in responses.groupby("source")]
-    if responses["source"].nunique() == 1:
-        groups = groups[:1]
+    groups = [("all", responses)]
+    if responses["source"].nunique() > 1:
+        groups += [(s, g) for s, g in responses.groupby("source")]
+    held = responses[responses.source == "holdout"]
+    if "style" in held and held["style"].nunique() > 1:
+        groups += [(f"holdout[{s}]", g) for s, g in held.groupby("style")]
     for source, df in groups:
         for alpha, g in df.groupby("alpha"):
             labeled = g[g["label"].notna()]

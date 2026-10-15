@@ -19,6 +19,7 @@ class Pair:
     prompt: str
     honest: str
     sycophantic: str
+    style: str = "standard"   # standard | style_swapped (honest reply exclamatory, sycophantic reply calm)
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class EvalPrompt:
     prompt: str
     domain: str = "custom"
     source: str = "custom"   # holdout | custom
+    style: str = ""
 
 
 def load_pairs(path: str | Path) -> list[Pair]:
@@ -50,7 +52,7 @@ def load_pairs(path: str | Path) -> list[Pair]:
                 raise ValueError(f"{path}:{lineno} duplicate id {pid!r}")
             seen.add(pid)
             pairs.append(Pair(pid, str(rec.get("domain") or "general"),
-                              rec["prompt"], rec["honest"], rec["sycophantic"]))
+                              rec["prompt"], rec["honest"], rec["sycophantic"], str(rec.get("style") or "standard")))
     if len(pairs) < 2:
         raise ValueError(f"{path} needs at least 2 pairs, found {len(pairs)}")
     return pairs
@@ -77,6 +79,24 @@ def stratified_split(pairs: list[Pair], holdout_fraction: float, seed: int) -> t
     if not holdout:
         raise ValueError("Holdout split is empty; add pairs or raise data.holdout_fraction")
     return train, holdout
+
+
+def make_splits(cfg) -> tuple[list[Pair], list[Pair]]:
+    """Training and held-out pairs.
+
+    With `data.holdout_pairs` set, every pair in `data.pairs` trains the vector and the
+    separate file is the held-out test set. Otherwise `data.pairs` is split by domain.
+    """
+    pairs = load_pairs(cfg.resolve_path(cfg.data.pairs))
+    if not cfg.data.holdout_pairs:
+        return stratified_split(pairs, cfg.data.holdout_fraction, cfg.data.seed)
+    holdout = load_pairs(cfg.resolve_path(cfg.data.holdout_pairs))
+    overlap_ids = {p.id for p in pairs} & {p.id for p in holdout}
+    overlap_prompts = {p.prompt.strip().lower() for p in pairs} & {p.prompt.strip().lower() for p in holdout}
+    if overlap_ids or overlap_prompts:
+        raise ValueError(f"Held-out file overlaps the training pairs: ids={sorted(overlap_ids)[:5]} "
+                         f"prompts={sorted(overlap_prompts)[:3]}")
+    return pairs, holdout
 
 
 def load_prompts(path: str | Path) -> list[EvalPrompt]:

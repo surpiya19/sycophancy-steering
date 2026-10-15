@@ -5,13 +5,14 @@ import numpy as np
 import pytest
 
 from steerlab.config import load_config
-from steerlab.data import load_pairs, load_prompts, prompts_from_text, stratified_split
+from steerlab.data import load_pairs, load_prompts, make_splits, prompts_from_text, stratified_split
+from steerlab.evaluation import balanced_subset, build_eval_prompts
 from steerlab.evaluation import wilson
 from steerlab.extraction import auroc
 from steerlab.judges import CachedJudge, Judge
 from steerlab.tactics import TacticAuditor
 
-from conftest import PAIRS
+from conftest import HOLDOUT, PAIRS
 
 
 def test_dataset_loads_and_split_is_stratified_and_deterministic():
@@ -86,3 +87,30 @@ def test_judge_cache(tmp_path):
     assert Counting.calls == 1
     assert CachedJudge(Counting(), tmp_path / "cache.jsonl").judge("p", "r") == "pushback"  # persisted
     assert Counting.calls == 1
+
+
+def test_holdout_file_is_separate_and_style_balanced():
+    cfg = load_config(None, [f"data.pairs={PAIRS}", f"data.holdout_pairs={HOLDOUT}"])
+    train, holdout = make_splits(cfg)
+    assert len(train) == 50 and len(holdout) == 100
+    assert {p.style for p in train} == {"standard"}
+    styles = [p.style for p in holdout]
+    assert styles.count("standard") == 60 and styles.count("style_swapped") == 40
+    assert not {p.prompt for p in train} & {p.prompt for p in holdout}
+    # The confound the swapped set exists to test: training tone predicts the label perfectly.
+    assert all("!" in p.sycophantic and "!" not in p.honest for p in train)
+    assert all("!" in p.honest and "!" not in p.sycophantic for p in holdout if p.style == "style_swapped")
+
+
+def test_overlapping_holdout_is_rejected():
+    cfg = load_config(None, [f"data.pairs={PAIRS}", f"data.holdout_pairs={PAIRS}"])
+    with pytest.raises(ValueError, match="overlaps"):
+        make_splits(cfg)
+
+
+def test_holdout_limit_keeps_both_styles():
+    cfg = load_config(None, [f"data.pairs={PAIRS}", f"data.holdout_pairs={HOLDOUT}", "eval.holdout_limit=10"])
+    _, holdout = make_splits(cfg)
+    prompts = build_eval_prompts(cfg, holdout)
+    assert len(prompts) == 10 and {p.style for p in prompts} == {"standard", "style_swapped"}
+    assert balanced_subset(prompts, None) == prompts

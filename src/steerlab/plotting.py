@@ -36,19 +36,35 @@ def _style(ax, title: str, xlabel: str, ylabel: str):
     ax.tick_params(colors=INK2)
 
 
+STYLE_LABEL = {"standard": "Same style as training", "style_swapped": "Style swapped (calm sycophant, excited honest)"}
+SWAP = "#6250d6"  # violet: the style-swapped test set
+
+
 def plot_layer_sweep(sep: pd.DataFrame, chosen_layer: int, path: Path) -> Path:
-    """Held-out AUROC and pairwise accuracy per layer: which layers encode the distinction."""
-    hold = sep[sep.split == "holdout"].sort_values("layer")
+    """Held-out AUROC per layer. With style subsets, one line per subset: if the
+    style-swapped line collapses toward chance, the vector is mostly reading tone."""
     fig, ax = plt.subplots(figsize=(8, 3.8), dpi=180)
-    ax.plot(hold.layer, hold.auroc, color=HONEST, lw=2, marker="o", ms=4, label="Held-out AUROC")
-    ax.plot(hold.layer, hold.pairwise_accuracy, color=STEER, lw=2, marker="s", ms=4, label="Held-out pairwise accuracy")
+    styled = sorted(x for x in sep.split.unique() if x.startswith("holdout["))
+    if styled:
+        for split, color, marker, ls in zip(styled, (HONEST, SWAP, STEER), ("o", "s", "^"), ("-", "--", ":")):
+            d = sep[sep.split == split].sort_values("layer")
+            style = split[len("holdout["):-1]
+            ax.plot(d.layer, d.auroc, color=color, lw=2, ls=ls, marker=marker, ms=4,
+                    label=f"{STYLE_LABEL.get(style, style)}")
+        title = "Does the vector track sycophancy, or just tone?"
+    else:
+        hold = sep[sep.split == "holdout"].sort_values("layer")
+        ax.plot(hold.layer, hold.auroc, color=HONEST, lw=2, marker="o", ms=4, label="Held-out AUROC")
+        ax.plot(hold.layer, hold.pairwise_accuracy, color=STEER, lw=2, marker="s", ms=4, label="Held-out pairwise accuracy")
+        title = "Which layers separate honest from sycophantic replies?"
+    last = int(sep.layer.max())
     ax.axhline(0.5, color=BASE, ls=":", lw=1)
-    ax.text(hold.layer.max(), 0.51, "chance", color=BASE, ha="right", va="bottom", fontsize=8)
+    ax.text(last, 0.51, "chance", color=BASE, ha="right", va="bottom", fontsize=8)
     ax.axvline(chosen_layer, color=INK2, ls="--", lw=1)
     ax.text(chosen_layer + 0.2, 0.03, f"steering layer {chosen_layer}", color=INK2, fontsize=8, rotation=90, va="bottom")
     ax.set_ylim(0, 1.05)
-    _style(ax, "Which layers separate honest from sycophantic replies?", "Decoder layer (output)", "Score on held-out pairs")
-    ax.legend(frameon=False, loc="lower right")
+    _style(ax, title, "Decoder layer (output)", "Held-out AUROC" if styled else "Score on held-out pairs")
+    ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2)
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
@@ -56,22 +72,31 @@ def plot_layer_sweep(sep: pd.DataFrame, chosen_layer: int, path: Path) -> Path:
 
 
 def plot_separation(art, layer: int, path: Path) -> Path:
-    """Distribution of held-out reply projections on the honest..sycophantic scale."""
-    mask = art.is_holdout
-    h = art.score(layer, art.honest_proj[mask, layer]).numpy()
-    s = art.score(layer, art.syc_proj[mask, layer]).numpy()
-    fig, ax = plt.subplots(figsize=(8, 3.8), dpi=180)
-    lo, hi = float(min(h.min(), s.min(), -1.5)), float(max(h.max(), s.max(), 1.5))
-    bins = np.linspace(lo, hi, 25)
-    for vals, color, name in ((h, HONEST, "Honest"), (s, SYC, "Sycophantic")):
-        ax.hist(vals, bins=bins, histtype="stepfilled", color=color, alpha=0.30, lw=0)
-        ax.hist(vals, bins=bins, histtype="step", color=color, lw=2, label=f"{name} replies (n={len(vals)})")
-    for x in (-1, 1):
-        ax.axvline(x, color=BASE, ls=":", lw=1)
+    """Held-out honest vs sycophantic replies on the score scale, one panel per style subset."""
     from .extraction import auroc
-    _style(ax, f"Held-out separation at layer {layer} (AUROC {auroc(s, h):.2f})",
-           "Sycophancy score  (−1 = typical honest reply, +1 = typical sycophantic reply)", "Replies")
-    ax.legend(frameon=False)
+    styles = np.array(art.styles or ["standard"] * len(art.pair_ids))
+    hold = art.is_holdout.numpy()
+    groups = sorted(set(styles[hold]))
+    allh = art.score(layer, art.honest_proj[:, layer]).numpy()
+    alls = art.score(layer, art.syc_proj[:, layer]).numpy()
+    lo = float(min(allh[hold].min(), alls[hold].min(), -1.5))
+    hi = float(max(allh[hold].max(), alls[hold].max(), 1.5))
+    bins = np.linspace(lo, hi, 25)
+    fig, axes = plt.subplots(1, len(groups), figsize=(8 if len(groups) == 1 else 12, 3.8), dpi=180,
+                             squeeze=False, sharey=True)
+    for ax, g in zip(axes[0], groups):
+        m = hold & (styles == g)
+        h, s = allh[m], alls[m]
+        for vals, color, name in ((h, HONEST, "Honest"), (s, SYC, "Sycophantic")):
+            ax.hist(vals, bins=bins, histtype="stepfilled", color=color, alpha=0.30, lw=0)
+            ax.hist(vals, bins=bins, histtype="step", color=color, lw=2, label=f"{name} replies (n={len(vals)})")
+        for x in (-1, 1):
+            ax.axvline(x, color=BASE, ls=":", lw=1)
+        name = STYLE_LABEL.get(g, g) if len(groups) > 1 else "Held-out"
+        _style(ax, f"{name}: AUROC {auroc(s, h):.2f}", "Sycophancy score  (−1 typical honest … +1 typical sycophantic)",
+               "Replies" if ax is axes[0][0] else "")
+        ax.legend(frameon=False, fontsize=8)
+    fig.suptitle(f"Held-out separation at layer {layer}", x=0.01, ha="left", fontsize=11, fontweight="bold", color=INK)
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)

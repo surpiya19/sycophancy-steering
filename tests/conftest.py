@@ -6,6 +6,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PAIRS = ROOT / "data" / "contrastive_pairs.jsonl"
+HOLDOUT = ROOT / "data" / "holdout_pairs.jsonl"
 
 
 def _load_builder():

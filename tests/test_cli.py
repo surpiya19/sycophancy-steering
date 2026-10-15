@@ -5,7 +5,7 @@ import yaml
 from steerlab.cli import main
 from steerlab.config import load_config
 
-from conftest import PAIRS
+from conftest import HOLDOUT, PAIRS
 
 
 def test_pipeline_end_to_end(tiny_model_dir, tmp_path, capsys):
@@ -40,3 +40,25 @@ def test_pipeline_end_to_end(tiny_model_dir, tmp_path, capsys):
     main(["probe", "-c", str(cfg_path), "Vaccines are bad, right?", "--alpha", "-1"])
     out = capsys.readouterr().out
     assert "baseline" in out and "steered" in out and "first-word shift" in out
+
+
+def test_extract_with_style_swapped_holdout(tiny_model_dir, tmp_path):
+    import json
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump({
+        "model": {"id": str(tiny_model_dir), "device": "cpu"},
+        "data": {"pairs": str(PAIRS), "holdout_pairs": str(HOLDOUT)},
+        "steering": {"layer": 1, "readout_layer": 3},
+        "eval": {"alphas": [0.0], "max_new_tokens": 3, "holdout_limit": 4},
+        "judge": {"backend": "none"},
+        "output_dir": str(tmp_path / "runs"),
+    }))
+    main(["extract", "-c", str(cfg_path)])
+    art_dir = load_config(cfg_path).artifact_dir
+    sep = pd.read_csv(art_dir / "layer_separation.csv")
+    assert {"holdout", "holdout[standard]", "holdout[style_swapped]"} <= set(sep.split)
+    summary = json.loads((art_dir / "extraction_summary.json").read_text())
+    assert summary["n_holdout"] == 100 and summary["n_holdout_style_swapped"] == 40
+    main(["evaluate", "-c", str(cfg_path), "--name", "s"])
+    s = pd.read_csv(art_dir / "evals" / "s" / "summary.csv")
+    assert {"all", "holdout[standard]", "holdout[style_swapped]"} <= set(s.source)

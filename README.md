@@ -8,6 +8,15 @@ Find the direction in a language model's activations that separates **honest pus
 
 It works with Hugging Face causal LMs whose decoder blocks it can locate: Llama, Mistral, Qwen, SmolLM, Gemma, Phi, GPT-2, GPT-NeoX and similar. Everything is driven by one YAML config.
 
+## The idea in plain words
+
+A chatbot has a bad habit: it likes to agree with you, even when you're wrong ("2 + 2 = 5, right?" → "Yes, you're so smart!"). That habit is called **sycophancy**.
+
+1. **Show it good and bad answers.** For 50 risky or wrong ideas we wrote an honest reply and a suck-up reply, and recorded what lights up inside the model for each.
+2. **Find the arrow.** The average difference between the two points in one direction inside the model: the "suck-up arrow".
+3. **Turn the dial.** Pushing the model's thoughts along the arrow (α > 0) makes it agree more; pushing against it (α < 0) makes it push back.
+4. **Check honestly.** We test on 100 conversations the model never studied. In 40 of them we swap the styles: the honest reply is cheerful and full of exclamation marks, the suck-up reply calm. If the arrow still tells them apart, it has found agreement itself. If it flips, it was mostly detecting excited tone.
+
 ## Install
 
 ```bash
@@ -42,6 +51,26 @@ steerlab extract -c configs/tiny.yaml && steerlab evaluate -c configs/tiny.yaml
 | In the evaluation | `steerlab evaluate --prompts examples/my_prompts.txt`. Your prompts are swept across all alphas next to the held-out set, and reported separately in `summary.csv`. |
 | Pressure-tactic check only | `steerlab audit "You'd agree I'm right, wouldn't you?"` (no model needed) |
 
+## The held-out test set: does the vector track sycophancy, or tone?
+
+`data/holdout_pairs.jsonl` holds **100 pairs the vector never trains on** (all 50 training pairs are used to build it), spread across the same 8 domains:
+
+| Subset | n | Honest reply | Sycophantic reply |
+|---|---|---|---|
+| `standard` | 60 | calm, no exclamation marks | gushing, with exclamation marks |
+| `style_swapped` | 40 | warm and exclamatory | calm and measured |
+
+This matters because in the training set **every** sycophantic reply has an exclamation mark and **no** honest reply does, so a vector that only detects excitement would look perfect on standard pairs. The swapped subset breaks that shortcut:
+
+- High AUROC on both subsets: the vector reads agreement with a false or risky premise.
+- High on `standard`, near or below 0.5 on `style_swapped`: it mostly reads tone. Below 0.5 means it is scoring the excited honest replies as more sycophantic.
+
+`steerlab extract` reports both subsets separately in `extraction_summary.json`, `layer_separation.csv`, `layer_sweep.png` (one line per subset across layers) and `separation.png` (one panel per subset). `steerlab evaluate` also splits its summary into `holdout[standard]` and `holdout[style_swapped]`. Regenerate or extend the set with `python scripts/build_holdout.py`; it refuses prompts that duplicate training prompts and pairs that don't follow their subset's tone rule.
+
+Generating replies for all 100 prompts at 7 strengths takes a while on a laptop, so `eval.holdout_limit: 40` evaluates a style-balanced 40 by default. Extraction always uses all 100. Set `--set eval.holdout_limit=null` for the full set.
+
+If the swapped subset shows a tone problem, the fix is in the training data: add training pairs whose tone runs against their label (`"style": "style_swapped"` is accepted in either file), so tone stops predicting the label.
+
 ## What gets produced
 
 **`runs/<model>/`**, written by `extract`:
@@ -49,8 +78,8 @@ steerlab extract -c configs/tiny.yaml && steerlab evaluate -c configs/tiny.yaml
 | File | What it shows |
 |---|---|
 | `vectors.pt` | One unit vector per layer, plus calibration data |
-| `layer_sweep.png` | Held-out AUROC and pairwise accuracy per layer: which layers actually encode the distinction |
-| `separation.png` | Held-out honest and sycophantic replies on the score scale. Two separated humps mean the vector is real. |
+| `layer_sweep.png` | Held-out AUROC per layer, one line per style subset: which layers encode the distinction, and whether it survives the style swap |
+| `separation.png` | Held-out honest and sycophantic replies on the score scale, one panel per subset. Two separated humps in both panels mean the vector reads agreement, not tone. |
 | `extraction_summary.json` | Headline numbers, the best layer, and the tokens the vector promotes or suppresses |
 | `layer_separation.csv` | The full per-layer table |
 
@@ -84,7 +113,7 @@ These replace the original PCA plot. That plot fit PCA on the difference vectors
 
 - **One layer convention.** Activations are always read with hooks on the steered block. The original read `hidden_states[i]` (layer i−1's output) but injected at layer i's output. `tests/test_model.py` checks the hook against `hidden_states[i+1]`.
 - **Same chat template everywhere.** Extraction, probing and generation all render prompts the same way. The reply span is found by token length, not by searching for an "Assistant:" marker.
-- **An independent judge.** The judge is Claude or a separate open model, never the model being steered. The open-model judge reads the A/B/C logits directly, and all judgments are cached.
+- **An independent judge.** The judge is Claude or a separate open model, never the model being steered. The open-model judge reads the A/B/C logits directly, and all judgments are cached. It loads at half precision (`judge.hf_dtype: half`), so the default 7B judge needs about 15 GB; on a tighter machine use `--set judge.hf_model=Qwen/Qwen2.5-3B-Instruct`, Claude, or `judge.backend=none`.
 - **Better statistics.** The holdout is stratified by domain, and confidence intervals are reported.
 - **Calibration that adapts to the layer.** Steering strength uses the median token norm at each layer, excluding the attention-sink position.
 - **Honest UI text.** Diagnosis messages come from measured changes, not from the α slider value.
@@ -93,7 +122,7 @@ These replace the original PCA plot. That plot fit PCA on the difference vectors
 
 | To grow | What to do |
 |---|---|
-| **More data** | Append lines to `data/contrastive_pairs.jsonl` (`id`, `domain`, `prompt`, `honest`, `sycophantic`). Extraction streams in two passes with O(layers × hidden) memory, so thousands of pairs are fine. |
+| **More data** | Append lines to `data/contrastive_pairs.jsonl` (`id`, `domain`, `prompt`, `honest`, `sycophantic`, optional `style`). Extraction streams in two passes with O(layers × hidden) memory, so thousands of pairs are fine. |
 | **Bigger models** | Copy `configs/qwen2.5-7b.yaml`, run `extract`, then choose `steering.layer` from `layer_sweep.png` instead of guessing. |
 | **Faster runs** | Raise `extraction.batch_size` and `generation.batch_size`. Batched and unbatched runs give identical results (tested). |
 | **Sweeps without editing files** | Override any value from the command line: `--set steering.layer=14 --set eval.alphas="[-2,0,2]"` |
@@ -103,9 +132,9 @@ These replace the original PCA plot. That plot fit PCA on the difference vectors
 
 ```
 configs/          default, tiny (offline smoke test), larger-model example
-data/             contrastive_pairs.jsonl (50 pairs, 8 domains)
+data/             contrastive_pairs.jsonl (50 training pairs), holdout_pairs.jsonl (100 held-out: 60 standard, 40 style-swapped)
 examples/         my_prompts.txt: a template for your own prompts
-scripts/          make_tiny_model.py
+scripts/          make_tiny_model.py, build_holdout.py
 src/steerlab/
   config.py       typed YAML config + dotted overrides
   data.py         pairs, stratified split, custom prompt files
@@ -124,6 +153,7 @@ tests/            mechanics, data and end-to-end CLI tests (pytest, run on the t
 
 ## Caveats
 
-- **Style can masquerade as stance.** The contrastive replies differ in tone as well as stance: the sycophantic ones use more exclamation marks and praise. Check the promoted tokens and the held-out separation before claiming the vector is "sycophancy" rather than "enthusiasm".
-- **Small held-out set.** Ten prompts give wide confidence intervals, so add pairs or your own prompts.
+- **Style can masquerade as stance.** In the training pairs tone and label line up perfectly. Read the `style_swapped` results before claiming the vector is "sycophancy" rather than "enthusiasm".
+- **The direct-path word list is unreliable at middle layers.** Later layers still transform the signal, so the list can look like noise. The app's first-word shift table measures the real effect.
+- **The held-out set is hand-written.** It is varied and checked for overlap, but it is still 100 pairs written in one voice; your own prompts are a useful extra test.
 - **The regex audit is lexical.** Expect false positives ("what if", "sad") and misses on paraphrases.
