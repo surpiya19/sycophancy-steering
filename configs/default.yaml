@@ -1,0 +1,40 @@
+# Default experiment: SmolLM2-1.7B-Instruct, steer at the midpoint, read 6 layers later.
+model:
+  id: HuggingFaceTB/SmolLM2-1.7B-Instruct
+  dtype: auto          # bfloat16 on CUDA, float32 otherwise
+  device: auto
+
+data:
+  pairs: data/contrastive_pairs.jsonl
+  holdout_fraction: 0.2   # per domain
+  seed: 42
+
+extraction:
+  batch_size: 8
+
+steering:
+  layer: 12            # output of decoder block 12 (0-based) is steered
+  readout_layer: 18    # read later, so explanations show the effect propagating
+  scale_fraction: 0.2  # alpha = 1 adds 20% of a typical token norm at the steering layer
+  positions: all       # or "generated" to leave the prompt untouched
+
+generation:
+  max_new_tokens: 90
+  batch_size: 8
+  temperature: 0.7
+  top_p: 0.9
+  seed: 1234
+
+judge:
+  backend: auto        # anthropic if ANTHROPIC_API_KEY is set, else a separate HF model; "none" to skip
+  anthropic_model: claude-haiku-5-5
+  hf_model: Qwen/Qwen2.5-7B-Instruct
+  cache: true
+
+eval:
+  alphas: [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]
+  max_new_tokens: 75
+  include_holdout: true
+  prompts_file: null   # e.g. examples/my_prompts.txt to add your own prompts
+
+output_dir: runs

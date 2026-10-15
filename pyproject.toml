@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "steerlab"
+version = "0.1.0"
+description = "Sycophancy steering & audit lab: contrastive activation steering with explainable readouts"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.1",
+  "transformers>=4.44",
+  "numpy",
+  "pandas",
+  "matplotlib",
+  "pyyaml",
+]
+
+[project.optional-dependencies]
+app = ["gradio>=4.0", "plotly>=5.0"]
+anthropic = ["anthropic>=0.40"]
+dev = ["pytest>=7", "tokenizers", "plotly>=5.0"]
+all = ["steerlab[app,anthropic,dev]"]
+
+[project.scripts]
+steerlab = "steerlab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+steerlab = ["resources/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

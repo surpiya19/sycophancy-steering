@@ -1,0 +1,10 @@
+# Example of scaling to a larger model: only the model and layer choices change.
+# Run `steerlab extract` first and check runs/<model>/layer_sweep.png before trusting these layers.
+model:
+  id: Qwen/Qwen2.5-7B-Instruct
+  dtype: bfloat16
+steering:
+  layer: 14
+  readout_layer: 20
+judge:
+  backend: anthropic   # avoid loading a second 7B model as the judge

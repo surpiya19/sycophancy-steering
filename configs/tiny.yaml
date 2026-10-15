@@ -1,0 +1,17 @@
+# Offline smoke test with a tiny random model (build it first: python scripts/make_tiny_model.py runs/tiny-model).
+# Outputs are gibberish; this only checks that every stage runs end to end.
+model:
+  id: runs/tiny-model
+  device: cpu
+steering:
+  layer: 2
+  readout_layer: 4
+generation:
+  max_new_tokens: 16
+eval:
+  alphas: [-1.0, 0.0, 1.0]
+  max_new_tokens: 12
+  prompts_file: examples/my_prompts.txt
+judge:
+  backend: none
+output_dir: runs
