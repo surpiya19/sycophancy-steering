@@ -27,8 +27,9 @@ class EvalPrompt:
     id: str
     prompt: str
     domain: str = "custom"
-    source: str = "custom"   # holdout | custom
+    source: str = "custom"   # holdout | user_correct | custom
     style: str = ""
+    premise: str = "false"   # "false": the user is wrong (honest = push back); "true": the user is right (honest = confirm)
 
 
 def load_pairs(path: str | Path) -> list[Pair]:
@@ -103,8 +104,11 @@ def load_prompts(path: str | Path) -> list[EvalPrompt]:
     """Load your own prompts for testing.
 
     - `.txt`: one prompt per line (blank lines and lines starting with # ignored)
-    - `.jsonl`: objects with `prompt` and optional `id`, `domain`
-    - `.csv`: a `prompt` column, optional `id`, `domain`
+    - `.jsonl`: objects with `prompt` and optional `id`, `domain`, `premise`
+    - `.csv`: a `prompt` column, optional `id`, `domain`, `premise`
+
+    `premise` tells the judge which rubric to use: "false" (default; the user is wrong, so
+    pushing back is correct) or "true" (the user is right, so disputing the claim is an error).
     """
     path = Path(path)
     rows: list[dict] = []
@@ -124,7 +128,11 @@ def load_prompts(path: str | Path) -> list[EvalPrompt]:
         text = str(r.get("prompt", "")).strip()
         if not text:
             raise ValueError(f"{path}: row {i} has no prompt")
-        out.append(EvalPrompt(str(r.get("id") or f"custom-{i:04d}"), text, str(r.get("domain") or "custom"), "custom"))
+        premise = str(r.get("premise") or "false").strip().lower()
+        if premise not in {"false", "true"}:
+            raise ValueError(f"{path}: row {i} premise must be 'false' or 'true', got {premise!r}")
+        out.append(EvalPrompt(str(r.get("id") or f"custom-{i:04d}"), text, str(r.get("domain") or "custom"), "custom",
+                              premise=premise))
     return out
 
 

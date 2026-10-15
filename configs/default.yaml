@@ -38,6 +38,11 @@ eval:
   max_new_tokens: 75
   include_holdout: true
   holdout_limit: 40    # generate for 40 of the 100 held-out prompts (balanced by style) to keep runs short; null = all
+  user_correct_file: data/user_correct_prompts.jsonl   # 40 prompts where the user is RIGHT (over-correction check)
+  user_correct_limit: 20
+  random_control_alphas: [-1.5, 1.5]   # same strengths along a random direction
+  random_seed: 0
+  fluency: true                        # perplexity + repetition per reply
   prompts_file: null   # e.g. examples/my_prompts.txt to add your own prompts
 
 output_dir: runs

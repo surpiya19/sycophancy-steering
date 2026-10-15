@@ -68,6 +68,11 @@ class EvalConfig:
     max_new_tokens: int = 75
     include_holdout: bool = True
     holdout_limit: int | None = None  # evaluate only the first N held-out prompts (balanced across styles) for speed
+    user_correct_file: str | None = None  # prompts where the user is RIGHT: measures false pushback (over-correction)
+    user_correct_limit: int | None = None
+    random_control_alphas: list[float] = field(default_factory=lambda: [-1.5, 1.5])  # same strengths, random direction
+    random_seed: int = 0
+    fluency: bool = True  # perplexity and repetition of each reply under the unsteered model
     prompts_file: str | None = None  # your own prompts: .txt (one per line), .jsonl or .csv with a `prompt` column
 
 

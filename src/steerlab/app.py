@@ -149,6 +149,19 @@ def build_app(lm, art: SteeringArtifacts, cfg, artifact_dir: Path | None = None)
     with gr.Blocks(title="Sycophancy Steering Lab") as demo:
         gr.Markdown(f"# Sycophancy Steering Lab\nModel `{art.model_id}` · steering layer {s.layer} · "
                     f"readout layer {s.readout_layer}. Negative α pushes toward honest pushback, positive α toward agreement.")
+        with gr.Accordion("What is this? (plain-language explanation)", open=False):
+            gr.Markdown(
+                "Chatbots like to agree with you, even when you're wrong. That habit is called **sycophancy**.\n\n"
+                "1. We showed this model pairs of answers to the same risky or false idea: an honest one and a "
+                "suck-up one, and recorded what lights up inside it for each.\n"
+                "2. The average difference points in one direction inside the model: a **sycophancy arrow**.\n"
+                "3. The **α slider** pushes the model's thoughts along that arrow while it writes. Negative α pushes "
+                "toward honest pushback, positive α toward agreement.\n"
+                "4. Each word of the reply is tinted **blue** when the model's internal state looks like a typical "
+                "honest reply and **red** when it looks like a typical suck-up reply.\n\n"
+                "The catch we test for: in the training examples, every suck-up reply was full of exclamation marks. "
+                "So the arrow might partly mean \"excited\" rather than \"agreeable\". Try a calm, agreeable "
+                "prompt and a cheerful, honest one to see for yourself.")
         with gr.Tab("Test a prompt"):
             with gr.Row():
                 with gr.Column(scale=3):

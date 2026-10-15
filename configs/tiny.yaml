@@ -14,6 +14,9 @@ eval:
   alphas: [-1.0, 0.0, 1.0]
   max_new_tokens: 12
   holdout_limit: 10
+  user_correct_file: data/user_correct_prompts.jsonl
+  user_correct_limit: 6
+  random_control_alphas: [-1.0, 1.0]
   prompts_file: examples/my_prompts.txt
 judge:
   backend: none

@@ -36,6 +36,22 @@ def _artifacts(cfg):
     return art
 
 
+def _latest_run(cfg, name: str | None = None) -> Path:
+    evals = cfg.artifact_dir / "evals"
+    if name:
+        p = Path(name)
+        run = p if p.exists() else evals / name
+    else:
+        runs = sorted((d for d in evals.glob("*") if (d / "responses.csv").exists()), key=lambda d: d.stat().st_mtime) \
+            if evals.exists() else []
+        if not runs:
+            raise SystemExit(f"No evaluation runs in {evals}. Run `steerlab evaluate` first.")
+        run = runs[-1]
+    if not (run / "responses.csv").exists():
+        raise SystemExit(f"{run} has no responses.csv")
+    return run
+
+
 def cmd_extract(args):
     from .data import make_splits
     from .extraction import direct_token_effects, extract, layer_separation, write_extraction_report
@@ -65,7 +81,7 @@ def cmd_evaluate(args):
     from .data import make_splits
     from .evaluation import build_eval_prompts, run_alpha_sweep, save_eval, summarize
     from .judges import make_judge
-    from .plotting import plot_dose_response
+    from .plotting import plot_evaluation
 
     cfg, lm = _load(args)
     art = _artifacts(cfg)
@@ -76,7 +92,11 @@ def cmd_evaluate(args):
     if len(holdout) != len(holdout_ids):
         raise SystemExit("The held-out pairs changed since `steerlab extract`; re-run extract first.")
     prompts = build_eval_prompts(cfg, holdout, args.prompts)
-    print(f"[+] Evaluating {len(prompts)} prompts at α ∈ {cfg.eval.alphas}")
+    counts = {s: sum(p.source == s for p in prompts) for s in ("holdout", "user_correct", "custom")}
+    n_runs = len(cfg.eval.alphas) + len([a for a in cfg.eval.random_control_alphas if a != 0])
+    print(f"[+] Evaluating {len(prompts)} prompts ({', '.join(f'{v} {k}' for k, v in counts.items() if v)}) "
+          f"at α ∈ {cfg.eval.alphas}, plus a random-direction control at α ∈ {cfg.eval.random_control_alphas} "
+          f"({n_runs * len(prompts)} replies)")
     judge = make_judge(cfg, cfg.artifact_dir)
     try:
         responses = run_alpha_sweep(lm, art, cfg, prompts, judge)
@@ -86,8 +106,10 @@ def cmd_evaluate(args):
     run_dir = cfg.artifact_dir / "evals" / (args.name or datetime.now().strftime("%Y%m%d-%H%M%S"))
     save_eval(run_dir, responses, summary)
     save_config(cfg, run_dir / "config.yaml")
-    plot_dose_response(summary, run_dir / "dose_response.png", judge.name)
-    cols = ["source", "alpha", "n_labeled", "pushback_rate", "sycophantic_rate", "mean_score"]
+    (run_dir / "judge.txt").write_text(judge.name)
+    plot_evaluation(summary, run_dir / "evaluation_overview.png", judge.name)
+    cols = [c for c in ["condition", "subset", "alpha", "n_labeled", "pushback_rate", "sycophantic_rate",
+                        "false_pushback_rate", "mean_score", "perplexity_median"] if c in summary]
     print(summary[cols].round(3).to_string(index=False))
     print(f"[+] Saved responses, summary and figure to {run_dir}")
 
@@ -131,6 +153,39 @@ def cmd_probe(args):
             print(f"judge ({judge.name}): baseline={judge.judge(p, b.text)}  steered={judge.judge(p, st.text)}")
 
 
+def cmd_label(args):
+    from .labeling import interactive, print_score, score
+    cfg = load_config(args.config, args.overrides)
+    run = _latest_run(cfg, args.run)
+    print(f"[*] Evaluation run: {run}")
+    if args.score:
+        print_score(score(run / "human_labels.csv"))
+    else:
+        interactive(run, n=args.n, seed=args.seed)
+
+
+def cmd_report(args):
+    from .report import build_report
+    cfg = load_config(args.config, args.overrides)
+    if not (cfg.artifact_dir / "extraction_summary.json").exists():
+        raise SystemExit(f"No extraction in {cfg.artifact_dir}. Run `steerlab extract` first.")
+    run = None
+    try:
+        run = _latest_run(cfg, args.run)
+    except SystemExit as e:
+        if args.run:
+            raise
+        print(f"[!] {e} The report will cover the extraction only.")
+    opts = {"title": args.title, "author": args.author, "affiliation": args.affiliation, "url": args.url,
+            "acknowledge_ai": not args.no_ack}
+    out = build_report(cfg.artifact_dir, run, Path(args.out), poster=not args.no_poster, poster_opts=opts)
+    print(f"[+] Results: {out['results_md']}")
+    for name, path in out["figures"].items():
+        print(f"    figure : {path}")
+    if "poster" in out:
+        print(f"[+] Poster : {out['poster']}  (preview: {Path(out['poster']).with_suffix('.png')})")
+
+
 def cmd_audit(args):
     from .tactics import TacticAuditor
     rep = TacticAuditor(args.patterns).audit(args.prompt)
@@ -167,6 +222,26 @@ def main(argv=None):
     p.add_argument("--sample", action="store_true", help="Sample instead of greedy decoding")
     p.add_argument("--judge", action="store_true", help="Also label both replies with the judge")
     p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("label", help="Validate the judge: label a sample of replies yourself, then compare")
+    _common(p)
+    p.add_argument("--run", help="Evaluation run name or folder (default: the latest)")
+    p.add_argument("-n", type=int, default=40, help="How many replies to label (default 40)")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--score", action="store_true", help="Only compute agreement from labels already saved")
+    p.set_defaults(func=cmd_label)
+
+    p = sub.add_parser("report", help="Write results/RESULTS.md, copy figures and build the poster PDF")
+    _common(p)
+    p.add_argument("--run", help="Evaluation run name or folder (default: the latest)")
+    p.add_argument("--out", default="results", help="Output folder (default: results/, which is tracked in git)")
+    p.add_argument("--title", default=None)
+    p.add_argument("--author", default="")
+    p.add_argument("--affiliation", default="")
+    p.add_argument("--url", default="", help="Repo or demo link printed on the poster")
+    p.add_argument("--no-ack", action="store_true", help="Leave out the AI-assistance acknowledgement")
+    p.add_argument("--no-poster", action="store_true")
+    p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("audit", help="Regex pressure-tactic audit only (no model)")
     p.add_argument("prompt")

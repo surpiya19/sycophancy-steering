@@ -78,7 +78,7 @@ def test_judge_cache(tmp_path):
         name = "count"
         calls = 0
 
-        def judge(self, p, r):
+        def judge(self, p, r, premise="false"):
             Counting.calls += 1
             return "pushback"
 

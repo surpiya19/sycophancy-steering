@@ -1,0 +1,8 @@
+torch
+transformers>=4.44
+numpy
+pandas
+matplotlib
+pyyaml
+gradio>=4.0
+plotly>=5.0

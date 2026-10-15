@@ -103,40 +103,78 @@ def plot_separation(art, layer: int, path: Path) -> Path:
     return path
 
 
-def plot_dose_response(summary: pd.DataFrame, path: Path, judge_name: str = "") -> Path:
-    """Two panels on one x-axis: what the judge saw, and what the internal readout saw."""
-    df = summary[summary.source == "all"].sort_values("alpha")
-    has_labels = df["n_labeled"].sum() > 0
-    fig, axes = plt.subplots(1, 2 if has_labels else 1, figsize=(11 if has_labels else 6, 4), dpi=180, squeeze=False)
-    axes = axes[0]
-    if has_labels:
-        ax = axes[0]
-        for label, color, marker in (("pushback", HONEST, "o"), ("sycophantic", SYC, "s"), ("neutral", NEUTRAL, "^")):
-            y = df[f"{label}_rate"] * 100
-            if label != "neutral":  # keep the bands readable: CIs for the two poles only
-                ax.fill_between(df.alpha, df[f"{label}_lo"] * 100, df[f"{label}_hi"] * 100, color=color, alpha=0.12, lw=0)
-            ax.plot(df.alpha, y, color=color, lw=2, marker=marker, ms=6, label=label.capitalize())
+CONFIRM, FALSEPB = "#008300", "#6250d6"
+
+
+def _rate_lines(ax, summary, subset, series, title, n_note):
+    """Steered rates as lines with 95% bands; random-direction control as hollow markers."""
+    st = summary[(summary.condition == "steered") & (summary.subset == subset)].sort_values("alpha")
+    rd = summary[(summary.condition == "random") & (summary.subset == subset)].sort_values("alpha")
+    if st.empty or st.n_labeled.sum() == 0:
+        ax.text(0.5, 0.5, "No judge labels for this subset\n(run evaluate with a judge)", ha="center", va="center",
+                transform=ax.transAxes, color=INK2)
+        _style(ax, title, "Steering strength α", "% of prompts")
+        return
+    for label, color, marker in series:
+        ax.fill_between(st.alpha, st[f"{label}_lo"] * 100, st[f"{label}_hi"] * 100, color=color, alpha=0.12, lw=0)
+        ax.plot(st.alpha, st[f"{label}_rate"] * 100, color=color, lw=2, marker=marker, ms=6,
+                label=label.replace("_", " ").capitalize())
+        if not rd.empty:
+            ax.plot(rd.alpha, rd[f"{label}_rate"] * 100, ls="none", marker=marker, ms=9, mfc="none", mec=color, mew=2)
+    if not rd.empty:
+        ax.plot([], [], ls="none", marker="o", ms=9, mfc="none", mec=INK2, mew=2, label="Random direction (control)")
+    ax.axvline(0, color=BASE, ls=":", lw=1)
+    ax.set_ylim(-3, 103)
+    _style(ax, title, "Steering strength α  (− pushback … + agreement)", f"% of {n_note} prompts (95% CI)")
+    ax.legend(frameon=False, fontsize=8, loc="best")
+
+
+def plot_evaluation(summary: pd.DataFrame, path: Path, judge_name: str = "") -> Path:
+    """Four panels sharing the α axis: the benefit, the over-correction risk, fluency, and the internal readout."""
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8.5), dpi=180)
+    (a, b), (c, d) = axes
+    n_h = int(summary[summary.subset == "holdout"].n_labeled.max() or 0) if (summary.subset == "holdout").any() else 0
+    n_u = int(summary[summary.subset == "user_correct"].n_labeled.max() or 0) if (summary.subset == "user_correct").any() else 0
+    _rate_lines(a, summary, "holdout", (("pushback", HONEST, "o"), ("sycophantic", SYC, "s")),
+                "1  User is wrong: does steering reduce sycophancy?", n_h)
+    _rate_lines(b, summary, "user_correct", (("confirms", CONFIRM, "o"), ("false_pushback", FALSEPB, "s")),
+                "2  User is right: does it start arguing anyway?", n_u)
+
+    def metric(ax, col, title, ylabel, bands=False):
+        sub = summary[summary.subset == "holdout"]
+        st = sub[sub.condition == "steered"].sort_values("alpha")
+        rd = sub[sub.condition == "random"].sort_values("alpha")
+        if st.empty or col not in st or st[col].isna().all():
+            ax.text(0.5, 0.5, "Not measured", ha="center", va="center", transform=ax.transAxes, color=INK2)
+        else:
+            err = 1.96 * st["mean_score_sem"].fillna(0) if col == "mean_score" else None
+            ax.errorbar(st.alpha, st[col], yerr=err, color=STEER, lw=2, marker="o", ms=6, capsize=3,
+                        label="Sycophancy direction")
+            if not rd.empty:
+                ax.plot(rd.alpha, rd[col], ls="none", marker="o", ms=9, mfc="none", mec=INK2, mew=2,
+                        label="Random direction (control)")
+            ax.legend(frameon=False, fontsize=8)
+        if bands:
+            ax.axhspan(-1.2, -0.8, color=HONEST, alpha=0.08, lw=0)
+            ax.axhspan(0.8, 1.2, color=SYC, alpha=0.08, lw=0)
+            ax.text(0.01, 1.0, "typical sycophantic reply", transform=ax.get_yaxis_transform(), color=SYC, fontsize=8, va="bottom")
+            ax.text(0.01, -1.0, "typical honest reply", transform=ax.get_yaxis_transform(), color=HONEST, fontsize=8, va="top")
+            ax.axhline(0, color=BASE, ls=":", lw=1)
         ax.axvline(0, color=BASE, ls=":", lw=1)
-        ax.set_ylim(-3, 103)
-        n = int(df["n_labeled"].max())
-        _style(ax, "Behaviour: judged stance vs steering strength", "Steering strength α  (− pushback, + sycophancy)",
-               f"% of {n} prompts (95% CI)")
-        ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3)
-        if judge_name:
-            ax.text(1, 1.01, f"judge: {judge_name}", transform=ax.transAxes, ha="right", va="bottom", fontsize=7, color=BASE)
-    ax = axes[-1]
-    ax.errorbar(df.alpha, df.mean_score, yerr=1.96 * df.mean_score_sem.fillna(0), color=STEER, lw=2, marker="o",
-                ms=6, capsize=3)
-    ax.axhspan(-1.2, -0.8, color=HONEST, alpha=0.08, lw=0)
-    ax.axhspan(0.8, 1.2, color=SYC, alpha=0.08, lw=0)
-    ax.axhline(0, color=BASE, ls=":", lw=1)
-    ax.text(0.01, 1.0, "typical sycophantic reply", transform=ax.get_yaxis_transform(), color=SYC, fontsize=8, va="bottom")
-    ax.text(0.01, -1.0, "typical honest reply", transform=ax.get_yaxis_transform(), color=HONEST, fontsize=8, va="top")
-    _style(ax, "Internals: readout-layer sycophancy score", "Steering strength α", "Mean per-token score (±95% CI)")
+        _style(ax, title, "Steering strength α", ylabel)
+
+    metric(c, "perplexity_median", "3  Is the text still fluent?", "Median perplexity (lower = more natural)")
+    metric(d, "mean_score", "4  Internals: readout-layer sycophancy score", "Mean per-token score (±95% CI)", bands=True)
+    if judge_name:
+        fig.text(0.99, 0.005, f"judge: {judge_name}", ha="right", fontsize=7, color=BASE)
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
     return path
+
+
+def plot_dose_response(summary: pd.DataFrame, path: Path, judge_name: str = "") -> Path:  # backwards-compatible name
+    return plot_evaluation(summary, path, judge_name)
 
 
 # ----------------------------------------------------------------------------- app visuals

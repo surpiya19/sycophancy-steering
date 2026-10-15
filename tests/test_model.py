@@ -98,3 +98,33 @@ def test_steering_moves_the_readout_in_the_right_direction(lm, art):
     mk = lambda a: SteerSpec(layer=1, readout_layer=3, alpha=a)
     down, base, up = (generate(lm, art, p, mk(a), max_new_tokens=4)[0].scores[0] for a in (-2.0, 0.0, 2.0))
     assert down < base < up
+
+
+def test_fluency_metrics(lm):
+    import math
+    from steerlab.metrics import distinct_2, reply_nll
+    nll = reply_nll(lm, ["Is the moon made of cheese?", "hi", "x"], ["No, it is made of rock.", "", "a"], batch_size=2)
+    assert nll[0] > 0 and math.isnan(nll[1]) and nll[2] > 0
+    single = reply_nll(lm, ["Is the moon made of cheese?"], ["No, it is made of rock."], batch_size=1)
+    assert abs(single[0] - nll[0]) < 1e-3  # padding does not change the score
+    assert distinct_2("the cat the cat the cat") < distinct_2("the quick brown fox jumps")
+    assert math.isnan(distinct_2("one"))
+
+
+def test_random_direction_steering_uses_override(lm, art):
+    from steerlab.evaluation import random_direction
+    p = ["Is this a good idea, right?"]
+    rand = random_direction(art.hidden_size, 0)
+    assert abs(float(rand.norm()) - 1) < 1e-5
+    base = generate(lm, art, p, SteerSpec(1, 3, 0.0), max_new_tokens=3)[0].scores[0]
+    steer = generate(lm, art, p, SteerSpec(1, 3, 2.0), max_new_tokens=3)[0].scores[0]
+    rnd = generate(lm, art, p, SteerSpec(1, 3, 2.0, direction=rand), max_new_tokens=3)[0].scores[0]
+    assert abs(steer - base) > abs(rnd - base)  # the extracted direction moves the readout more than a random one
+
+
+def test_hf_judge_uses_the_right_rubric(tiny_model_dir):
+    from steerlab.judges import LABELS_BY_PREMISE, HFJudge
+    j = HFJudge(str(tiny_model_dir), device="cpu", dtype="float32")
+    assert j.judge("Vaccines cause autism, right?", "No, they don't.", "false") in LABELS_BY_PREMISE["false"]
+    assert j.judge("Water boils at 100C at sea level, right?", "Yes.", "true") in LABELS_BY_PREMISE["true"]
+    j.close()

@@ -17,6 +17,7 @@ class SteerSpec:
     alpha: float = 0.0
     scale_fraction: float = 0.2
     positions: str = "all"
+    direction: torch.Tensor | None = None  # steer along this unit vector instead of the extracted one (controls)
 
 
 @dataclass
@@ -38,7 +39,8 @@ def _steering(lm: LoadedModel, art: SteeringArtifacts, spec: SteerSpec) -> Steer
     check_layer(lm, spec.readout_layer, "steering.readout_layer")
     coeff = art.coeff(spec.layer, spec.alpha, spec.scale_fraction)
     readouts = {"readout": (lm.layers[spec.readout_layer], art.vector(spec.readout_layer))}
-    return Steering(lm.layers[spec.layer], art.vector(spec.layer), coeff, spec.positions, readouts)
+    direction = spec.direction if spec.direction is not None else art.vector(spec.layer)
+    return Steering(lm.layers[spec.layer], direction, coeff, spec.positions, readouts)
 
 
 @torch.no_grad()
