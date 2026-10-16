@@ -3,7 +3,7 @@
 #
 #   steerlab extract -c configs/default.yaml       # once, so vectors exist
 #   bash scripts/prepare_space.sh
-#   cd runs/space_build && git init && git remote add origin https://huggingface.co/spaces/<you>/sycophancy-steering
+#   cd runs/space_build && git init && git remote add origin https://huggingface.co/spaces/USERNAME/SPACE-NAME
 #   git add -A && git commit -m "Deploy" && git push -u origin main
 set -euo pipefail
 cd "$(dirname "$0")/.."

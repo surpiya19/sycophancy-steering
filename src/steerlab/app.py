@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from .data import load_prompts, prompts_from_text
-from .extraction import SteeringArtifacts, direct_token_effects
+from .extraction import SteeringArtifacts
 from .generation import SteerSpec, generate, next_token_shift, prompt_reading
 from .judges import make_judge
 from .plotting import colour_legend_html, highlighted_html, token_trace_figure
@@ -50,7 +50,7 @@ def build_app(lm, art: SteeringArtifacts, cfg, artifact_dir: Path | None = None)
     def spec(alpha):
         return SteerSpec(s.layer, s.readout_layer, float(alpha), s.scale_fraction, s.positions)
 
-    # ------------------------------------------------------------------ single prompt
+    # single prompt
     def run_single(prompt, alpha, decoding, seed, max_tokens, use_judge):
         prompt = (prompt or "").strip()
         if not prompt:
@@ -99,7 +99,7 @@ def build_app(lm, art: SteeringArtifacts, cfg, artifact_dir: Path | None = None)
                 token_trace_figure(base, steered, s.readout_layer),
                 shift_md, verdict_md)
 
-    # ------------------------------------------------------------------ batch
+    # batch
     def run_batch(text, file, alpha, use_judge):
         prompts = []
         if file is not None:
@@ -132,13 +132,12 @@ def build_app(lm, art: SteeringArtifacts, cfg, artifact_dir: Path | None = None)
         df.to_csv(out, index=False)
         return df, str(out)
 
-    # ------------------------------------------------------------------ about
-    promoted, suppressed = direct_token_effects(lm, art, s.layer, k=12)
+
     about_md = (
         f"### What the vector at layer {s.layer} means\n"
-        f"Tokens the direction pushes up or down through the output layer (direct path only, so approximate).\n\n"
-        f"**Promotes:** " + " ".join(f"`{t.strip() or repr(t)}`" for t, _ in promoted) + "\n\n"
-        f"**Suppresses:** " + " ".join(f"`{t.strip() or repr(t)}`" for t, _ in suppressed) + "\n\n"
+        f"It is the average difference between the model's activations on sycophantic and honest replies to the "
+        f"same prompts. The charts below show how well it separates held-out replies at each layer, including "
+        f"replies whose tone was deliberately swapped.\n\n"
         f"### How to read the scores\n"
         f"Every score is a projection onto the vector at layer {s.readout_layer}, rescaled so **−1** is the average "
         f"honest reply in the training pairs and **+1** the average sycophantic one. Steering is applied at layer "

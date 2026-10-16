@@ -29,7 +29,7 @@ from .data import EvalPrompt, Pair, load_prompts
 from .extraction import SteeringArtifacts
 from .generation import SteerSpec, generate
 from .judges import ALL_LABELS, Judge
-from .metrics import distinct_2, perplexity, reply_nll
+from .metrics import distinct_2, perplexity, reply_nll, tone_markers
 from .modeling import LoadedModel
 
 
@@ -104,7 +104,7 @@ def run_alpha_sweep(lm: LoadedModel, art: SteeringArtifacts, cfg, prompts: list[
                          "prompt": p.prompt, "response": g.text, "label": label,
                          "mean_score": g.mean_score, "first_token_score": g.scores[0] if g.scores else float("nan"),
                          "n_tokens": len(g.tokens), "nll": nll, "perplexity": perplexity(nll),
-                         "distinct_2": distinct_2(g.text)})
+                         "distinct_2": distinct_2(g.text), **tone_markers(g.text)})
         df = pd.DataFrame(rows[-len(gens):])
         msg = f"[*] {i}/{len(plan)} {condition:8s} α={alpha:+.2f}  score={df.mean_score.mean():+.2f}"
         if cfg.eval.fluency:
@@ -147,6 +147,9 @@ def summarize(responses: pd.DataFrame) -> pd.DataFrame:
             if "perplexity" in g:
                 row["perplexity_median"] = g["perplexity"].median()
                 row["distinct_2_mean"] = g["distinct_2"].mean()
+            for col in ("exclamations", "emoji"):
+                if col in g:
+                    row[f"{col}_mean"] = pd.to_numeric(g[col], errors="coerce").mean()
             for label in ALL_LABELS:
                 k = int((labeled["label"] == label).sum())
                 lo, hi = wilson(k, n)
@@ -156,12 +159,33 @@ def summarize(responses: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def relabel(responses: pd.DataFrame, judge: Judge) -> pd.DataFrame:
+    """Re-grade saved replies with another judge, without generating anything again."""
+    out = responses.copy()
+    items = list(zip(out["prompt"], out["response"].fillna(""), out["premise"]))
+    labels = []
+    for i, item in enumerate(items, 1):
+        labels.append(judge.judge(*item))
+        if i % 25 == 0 or i == len(items):
+            print(f"\r[*] judged {i}/{len(items)}", end="", flush=True)
+    print()
+    out["label"] = labels
+    if "response" in out:  # older runs have no tone columns
+        tm = out["response"].fillna("").map(tone_markers)
+        out["exclamations"] = [t["exclamations"] for t in tm]
+        out["emoji"] = [t["emoji"] for t in tm]
+    return out
+
+
 def read_responses(path: str | Path) -> pd.DataFrame:
     """Load responses.csv with text columns kept as text (pandas would turn "true"/"false" into booleans)."""
     df = pd.read_csv(path, dtype={"premise": str, "style": str, "label": str, "response": str, "prompt": str},
                      keep_default_na=False, na_values={"label": [""], "mean_score": [""], "nll": [""],
                                                        "perplexity": [""], "distinct_2": [""], "first_token_score": [""]})
     df["premise"] = df["premise"].str.lower().replace({"": "false"})
+    for col in ("alpha", "exclamations", "emoji", "n_tokens", "distinct_2"):
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     df["label"] = df["label"].where(df["label"].notna() & (df["label"] != ""), None)
     return df
 
@@ -189,7 +213,8 @@ def headline(summary: pd.DataFrame, alpha_low: float | None = None) -> dict:
                                  ("holdout[style_swapped]", "sycophantic_rate", "sycophantic_swapped"),
                                  ("user_correct", "false_pushback_rate", "false_pushback"),
                                  ("user_correct", "confirms_rate", "confirms"),
-                                 ("holdout", "perplexity_median", "perplexity"), ("holdout", "mean_score", "score")):
+                                 ("holdout", "perplexity_median", "perplexity"), ("holdout", "mean_score", "score"),
+                                 ("holdout", "exclamations_mean", "exclamations"), ("holdout", "emoji_mean", "emoji")):
             out[f"{key}_{name}"] = get("steered", subset, alpha, col)
             if name != "base":
                 out[f"random_{key}_{name}"] = get("random", subset, alpha, col)

@@ -22,7 +22,7 @@ from .hooks import LayerReducer
 from .modeling import LoadedModel
 
 
-# --------------------------------------------------------------------------- artifacts
+# artifacts
 @dataclass
 class SteeringArtifacts:
     model_id: str
@@ -40,7 +40,7 @@ class SteeringArtifacts:
     meta: dict = field(default_factory=dict)
     styles: list[str] = field(default_factory=list)  # per pair: standard | style_swapped
 
-    # -------- steering helpers
+    # steering helpers
     def vector(self, layer: int) -> torch.Tensor:
         return self.vectors[layer]
 
@@ -48,7 +48,7 @@ class SteeringArtifacts:
         """alpha=1 adds `scale_fraction` of a typical token's norm at that layer."""
         return float(alpha) * float(self.token_norm[layer]) * scale_fraction
 
-    # -------- explainable score: -1 = typical honest reply, +1 = typical sycophantic reply
+    # explainable score: -1 = typical honest reply, +1 = typical sycophantic reply
     def anchors(self, layer: int) -> tuple[float, float]:
         train = ~self.is_holdout
         return float(self.honest_proj[train, layer].mean()), float(self.syc_proj[train, layer].mean())
@@ -65,7 +65,7 @@ class SteeringArtifacts:
         ref = self.prompt_proj[:, layer].numpy()
         return float((ref < projection).mean() * 100)
 
-    # -------- persistence
+    # persistence
     def save(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         torch.save({k: getattr(self, k) for k in self.__dataclass_fields__}, path)
@@ -79,7 +79,7 @@ class SteeringArtifacts:
         return cls(**data)
 
 
-# --------------------------------------------------------------------------- batching
+# batching
 def _batches(items, size):
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -181,7 +181,7 @@ def extract(lm: LoadedModel, train: list[Pair], holdout: list[Pair], batch_size:
     )
 
 
-# --------------------------------------------------------------------------- diagnostics
+# diagnostics
 def auroc(pos: np.ndarray, neg: np.ndarray) -> float:
     """Probability a random positive scores above a random negative (ties count half)."""
     pos, neg = np.asarray(pos, float), np.asarray(neg, float)

@@ -107,3 +107,33 @@ def test_kappa():
     from steerlab.labeling import cohens_kappa
     assert cohens_kappa(list("aabb"), list("aabb")) == 1.0
     assert abs(cohens_kappa(list("abab"), list("aabb"))) < 1e-9
+
+
+def test_rejudge_and_judge_sanity(tiny_model_dir, tmp_path):
+    from steerlab.evaluation import read_responses
+    from steerlab.metrics import tone_markers
+    from steerlab.report import judge_sanity
+    from conftest import ROOT
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.safe_dump({
+        "model": {"id": str(tiny_model_dir), "device": "cpu"},
+        "data": {"pairs": str(PAIRS)},
+        "steering": {"layer": 1, "readout_layer": 3},
+        "eval": {"alphas": [0.0], "max_new_tokens": 3, "holdout_limit": 2, "random_control_alphas": [],
+                 "user_correct_file": str(ROOT / "data" / "user_correct_prompts.jsonl"), "user_correct_limit": 2},
+        "judge": {"backend": "none"},
+        "output_dir": str(tmp_path / "runs"),
+    }))
+    main(["extract", "-c", str(cfg_path)])
+    main(["evaluate", "-c", str(cfg_path), "--name", "r"])
+    main(["rejudge", "-c", str(cfg_path), "--run", "r", "--name", "r2",
+          "--set", "judge.backend=hf", "--set", f"judge.hf_model={tiny_model_dir}", "--set", "judge.hf_dtype=float32"])
+    run2 = load_config(cfg_path).artifact_dir / "evals" / "r2"
+    df = read_responses(run2 / "responses.csv")
+    assert df["label"].notna().all() and {"exclamations", "emoji"} <= set(df.columns)
+    assert (run2 / "summary.csv").exists() and (run2 / "evaluation_overview.png").exists()
+
+    assert tone_markers("Absolutely! Great! 🎉🍓") == {"exclamations": 2, "emoji": 2}
+    fake = pd.DataFrame({"premise": ["true", "true", "false"], "label": ["false_pushback"] * 3,
+                         "response": ["Absolutely! Great choice!", "No, that's wrong.", "Yes"]})
+    assert judge_sanity(fake) == {"false_pushback_labels": 2, "open_by_agreeing": 1}

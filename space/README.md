@@ -12,8 +12,8 @@ short_description: Turn an LLM's sycophancy up or down and see why
 
 # Sycophancy Steering Lab
 
-Interactive demo of [steerlab](https://github.com/YOUR-USERNAME/sycophancy-steering): type a prompt, move the
-steering slider, and compare the model's normal and steered replies, with each word tinted by how
-"sycophantic" the model's internal state is.
+Demo for [sycophancy-steering](https://github.com/surpiya19/sycophancy-steering). Type a prompt, move the
+steering slider and compare the model's normal and steered replies. Each word is tinted by the model's
+internal sycophancy score.
 
 Runs SmolLM2-1.7B-Instruct on CPU, so replies take a little while.

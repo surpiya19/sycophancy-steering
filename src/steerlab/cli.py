@@ -42,7 +42,8 @@ def _latest_run(cfg, name: str | None = None) -> Path:
         p = Path(name)
         run = p if p.exists() else evals / name
     else:
-        runs = sorted((d for d in evals.glob("*") if (d / "responses.csv").exists()), key=lambda d: d.stat().st_mtime) \
+        runs = sorted((d for d in evals.glob("*") if (d / "responses.csv").exists()),
+                      key=lambda d: (d / "responses.csv").stat().st_mtime) \
             if evals.exists() else []
         if not runs:
             raise SystemExit(f"No evaluation runs in {evals}. Run `steerlab evaluate` first.")
@@ -153,6 +154,35 @@ def cmd_probe(args):
             print(f"judge ({judge.name}): baseline={judge.judge(p, b.text)}  steered={judge.judge(p, st.text)}")
 
 
+def cmd_rejudge(args):
+    import shutil
+    from .evaluation import read_responses, relabel, save_eval, summarize
+    from .judges import make_judge
+    from .plotting import plot_evaluation
+    cfg = load_config(args.config, args.overrides)
+    src = _latest_run(cfg, args.run)
+    judge = make_judge(cfg, cfg.artifact_dir)
+    if judge.name == "none":
+        raise SystemExit("Pick a judge to re-grade with, e.g. --set judge.backend=hf --set judge.hf_model=Qwen/Qwen2.5-7B-Instruct")
+    dst = src.parent / (args.name or f"{src.name}__{judge.name.split(':')[-1].split('/')[-1]}")
+    print(f"[*] Re-grading {src} with {judge.name} -> {dst}")
+    try:
+        responses = relabel(read_responses(src / "responses.csv"), judge)
+    finally:
+        judge.close()
+    summary = summarize(responses)
+    save_eval(dst, responses, summary)
+    for f in ("config.yaml",):
+        if (src / f).exists():
+            shutil.copy(src / f, dst / f)
+    (dst / "judge.txt").write_text(judge.name)
+    plot_evaluation(summary, dst / "evaluation_overview.png", judge.name)
+    old = read_responses(src / "responses.csv")
+    changed = (old["label"].fillna("") != responses["label"].fillna("")).mean()
+    print(f"[+] Saved to {dst}. {changed:.0%} of labels differ from the original judge.")
+    print(f"    Next: steerlab report --run {dst.name}")
+
+
 def cmd_label(args):
     from .labeling import interactive, print_score, score
     cfg = load_config(args.config, args.overrides)
@@ -222,6 +252,12 @@ def main(argv=None):
     p.add_argument("--sample", action="store_true", help="Sample instead of greedy decoding")
     p.add_argument("--judge", action="store_true", help="Also label both replies with the judge")
     p.set_defaults(func=cmd_probe)
+
+    p = sub.add_parser("rejudge", help="Re-grade a saved run's replies with a different judge (no regeneration)")
+    _common(p)
+    p.add_argument("--run", help="Evaluation run name or folder (default: the latest)")
+    p.add_argument("--name", help="Name for the re-graded run (default: <run>__<judge>)")
+    p.set_defaults(func=cmd_rejudge)
 
     p = sub.add_parser("label", help="Validate the judge: label a sample of replies yourself, then compare")
     _common(p)

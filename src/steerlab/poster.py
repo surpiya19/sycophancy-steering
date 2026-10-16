@@ -17,8 +17,8 @@ import matplotlib.image as mpimg  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch  # noqa: E402
 
-from .report import (FUTURE, LIMITATIONS, RESEARCH_QUESTION, judge_finding, num, pct, steering_findings,  # noqa: E402
-                     tone_finding)
+from .report import (FUTURE, LIMITATIONS, RESEARCH_QUESTION, headline_claim, judge_finding, num, pct,  # noqa: E402
+                     steering_findings, tone_finding)
 
 W, H = 24.0, 36.0          # inches
 MARGIN, GUTTER = 0.9, 0.8
@@ -55,6 +55,33 @@ REFERENCES = [
 ]
 
 
+_T2P = None
+
+
+def wrap_to_width(text: str, size: float, width_in: float, weight: str = "normal", style: str = "normal") -> list[str]:
+    """Greedy word wrap using real font metrics, so lines never run past the column edge."""
+    global _T2P
+    from matplotlib.font_manager import FontProperties
+    from matplotlib.textpath import TextToPath
+    _T2P = _T2P or TextToPath()
+    prop = FontProperties(size=size, weight=weight, style=style)
+    limit = width_in * 72  # points
+    width = lambda t: _T2P.get_text_width_height_descent(t, prop, ismath=False)[0]
+    lines, cur = [], ""
+    for word in text.split():
+        trial = f"{cur} {word}".strip()
+        if cur and width(trial) > limit:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        lines.append(cur)
+    if len(lines) == 1 and width(lines[0]) > limit:  # one unbreakable word that is still too wide
+        lines.append("")
+    return lines
+
+
 def _plain(s: str) -> str:
     return re.sub(r"\*\*|`", "", s)
 
@@ -75,8 +102,7 @@ class Column:
              bullet: str | None = None, line: float = 1.38):
         size *= self.k
         width = COL_W - indent - (0.45 if bullet else 0)
-        chars = max(20, int(width * 72 / (size * 0.5)))
-        lines = textwrap.wrap(_plain(s), chars) or [""]
+        lines = wrap_to_width(_plain(s), size, width, weight) or [""]
         lh = size * line / 72
         x = self.x0 + indent + (0.45 if bullet else 0)
         if bullet:
@@ -99,8 +125,7 @@ class Column:
 
     def callout(self, s: str, size: float = 29):
         size *= self.k
-        chars = max(20, int((COL_W - 0.9) * 72 / (size * 0.5)))
-        lines = textwrap.wrap(_plain(s), chars)
+        lines = wrap_to_width(_plain(s), size, COL_W - 0.9, style="italic")
         h = len(lines) * size * 1.38 / 72 + 0.7
         box = FancyBboxPatch((self.x0 / W, self._fy(self.y + h)), COL_W / W, h / H,
                              boxstyle="round,pad=0,rounding_size=0.006", transform=self.fig.transFigure,
@@ -138,9 +163,12 @@ class Column:
                                  boxstyle="round,pad=0,rounding_size=0.006", transform=self.fig.transFigure,
                                  facecolor=CARD, edgecolor="none")
             self.fig.add_artist(box)
-            self.fig.text((x + tw / 2) / W, self._fy(self.y + 0.3), value, fontsize=50, weight="bold", color=color,
-                          ha="center", va="top")
-            for j, ln in enumerate(textwrap.wrap(label, max(12, int(tw * 72 / (19 * 0.5))))[:3]):
+            vsize = 50
+            while vsize > 24 and len(wrap_to_width(value.replace(" ", "\u00a0"), vsize, tw - 0.35, "bold")) > 1:
+                vsize -= 2
+            self.fig.text((x + tw / 2) / W, self._fy(self.y + 0.3 + (50 - vsize) / 144), value, fontsize=vsize,
+                          weight="bold", color=color, ha="center", va="top")
+            for j, ln in enumerate(wrap_to_width(label, 19, tw - 0.3)[:3]):
                 self.fig.text((x + tw / 2) / W, self._fy(self.y + 1.35 + j * 0.36), ln, fontsize=19, color=INK2,
                               ha="center", va="top")
         self.y += th + 0.25
@@ -234,20 +262,29 @@ def _render(rd, figs: dict, scale: float = 1.0, title: str | None = None, author
     right.heading("Finding 1 · stance or tone?")
     std = ext.get("steering_layer_auroc_standard", ext.get("steering_layer_holdout_auroc"))
     swp = ext.get("steering_layer_auroc_style_swapped")
-    tiles = [(num(std), "held-out AUROC, training style", HONEST)]
+    tiles = [(num(std), "held-out AUROC, same style as training", HONEST)]
     if swp is not None:
         tiles.append((num(swp), "held-out AUROC, style swapped (0.5 = chance)", SWAP))
-    if h and h["has_labels"]:
-        tiles.append((f"{pct(h['sycophantic_base'])}→{pct(h['sycophantic_low'])}",
-                      f"sycophantic replies, α = 0 → {h['alpha_low']:+g}", SYC))
     right.stats(tiles)
     right.text(f"The vector {verdict}.", 28, ACCENT_DARK, weight="bold").gap(0.05)
     right.text(tone_text, 22)
     right.gap(0.15).image(figs.get("separation"))
     right.heading("Finding 2 · what steering does")
     if h:
-        findings = steering_findings(h, rd.summary)
-        keep = [t for t in findings if not t.startswith("By style")][:3]
+        claim = headline_claim(ext, h)
+        if claim:
+            right.text(claim, 26, ACCENT_DARK, weight="bold").gap(0.1)
+        if h["has_labels"]:
+            tiles = [(f"{pct(h['sycophantic_base'])}→{pct(h['sycophantic_high'])}",
+                      f"sycophantic, α = 0 → {h['alpha_high']:+g} (random: {pct(h['random_sycophantic_high'])})", SYC),
+                     (f"{pct(h['sycophantic_base'])}→{pct(h['sycophantic_low'])}",
+                      f"sycophantic, α = 0 → {h['alpha_low']:+g} (random: {pct(h['random_sycophantic_low'])})", HONEST)]
+            if not math.isnan(h.get("emoji_high", float("nan"))):
+                tiles.append((f"{num(h['emoji_base'], 1)}→{num(h['emoji_high'], 1)}",
+                              f"emoji per reply, α = 0 → {h['alpha_high']:+g}", SWAP))
+            right.stats(tiles)
+        findings = steering_findings(h, rd.summary, rd.sanity)
+        keep = [t for t in findings if t.startswith(("**Turning it down", "**User is right"))]
         for t in keep:
             right.text(t, 21, bullet="•").gap(0.05)
         right.gap(0.1).image(figs.get("evaluation_overview"))
@@ -257,7 +294,7 @@ def _render(rd, figs: dict, scale: float = 1.0, title: str | None = None, author
     right.heading("Limitations")
     for d in LIMITATIONS[:3]:
         right.text(d.format(model=ext["model_id"]), 20, bullet="•").gap(0.05)
-    right.text("More limitations and future work: results/RESULTS.md in the repository.", 18, MUTED)
+    right.text("Full limitations and future work: results/RESULTS.md in the repository.", 18, MUTED)
 
     # ---- footer (built upward from the bottom edge)
     tail = []

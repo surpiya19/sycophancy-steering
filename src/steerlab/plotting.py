@@ -177,7 +177,7 @@ def plot_dose_response(summary: pd.DataFrame, path: Path, judge_name: str = "") 
     return plot_evaluation(summary, path, judge_name)
 
 
-# ----------------------------------------------------------------------------- app visuals
+# app visuals
 def token_trace_figure(base, steered, readout_layer: int):
     """Per-token sycophancy score for the baseline and steered replies (plotly)."""
     import plotly.graph_objects as go
