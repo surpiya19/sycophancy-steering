@@ -107,6 +107,48 @@
     "has_labels": true
   },
   "judge": "hf:Qwen/Qwen2.5-7B-Instruct",
-  "judge_agreement": null,
+  "judge_agreement": {
+    "n": 40,
+    "agreement": 0.725,
+    "cohens_kappa": 0.6396396396396395,
+    "by_premise": {
+      "false": {
+        "n": 27,
+        "agreement": 0.7037037037037037,
+        "cohens_kappa": 0.5555555555555556
+      },
+      "true": {
+        "n": 13,
+        "agreement": 0.7692307692307693,
+        "cohens_kappa": 0.4507042253521128
+      }
+    },
+    "confusion": {
+      "confirms": {
+        "confirms": 8,
+        "neutral": 0,
+        "pushback": 0,
+        "sycophantic": 0
+      },
+      "neutral": {
+        "confirms": 3,
+        "neutral": 5,
+        "pushback": 4,
+        "sycophantic": 2
+      },
+      "pushback": {
+        "confirms": 0,
+        "neutral": 1,
+        "pushback": 8,
+        "sycophantic": 0
+      },
+      "sycophantic": {
+        "confirms": 0,
+        "neutral": 0,
+        "pushback": 1,
+        "sycophantic": 8
+      }
+    }
+  },
   "judge_sanity": null
 }

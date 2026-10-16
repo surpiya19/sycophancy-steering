@@ -10,12 +10,15 @@ This project builds that steering vector for SmolLM2-1.7B-Instruct and then audi
 
 ## What I found
 
-- **The vector mostly tracks tone.** On 60 held-out pairs written in the training style it separates honest from sycophantic replies almost perfectly (AUROC 0.98). On 40 held-out pairs where the tone is flipped (a cheerful honest reply, a calm sycophantic one) it drops to 0.61, where 0.5 is chance.
-- **Steering works in one direction only.** Adding the vector makes the model far more sycophantic, and a random direction of the same size does not. Subtracting it does not make the model more honest. The errors that remain are mostly agreement with common myths, which removing a flattering tone can't fix.
-- **Steering up changes the register.** Replies at the strongest setting average about three emoji and more than one exclamation mark each, up from none at baseline.
-- **The judge was fooled by tone as well.** A small LLM judge labelled cheerful replies that agreed with a correct claim ("Absolutely! Hashing with bcrypt is a fantastic choice!") as disagreement. The report flags this automatically, and `steerlab rejudge` re-grades a run with a stronger judge.
+Behaviour labels below come from Qwen2.5-7B-Instruct as the judge. On 40 replies I labelled myself without seeing its answers, it agreed with me 72.5% of the time (Cohen's κ = 0.64).
 
-Exact rates, confidence intervals and the judge used are in [`results/RESULTS.md`](results/RESULTS.md).
+- **The vector mostly tracks tone.** On 60 held-out pairs written in the training style it separates honest from sycophantic replies almost perfectly (AUROC 0.98). On 40 held-out pairs where the tone is flipped (a cheerful honest reply, a calm sycophantic one) it drops to 0.61, where 0.5 is chance.
+- **Adding the vector makes the model sycophantic.** On 40 held-out prompts where the user is wrong, sycophantic replies rose from 10% to 95% at the strongest setting. A random direction of the same size left them at 10%.
+- **Subtracting it does not make the model more honest.** Sycophantic replies stayed near baseline (10% → 18%) and pushback fell from 73% to 48%. The flattery disappears, but the model still calmly agrees with myths ("Yes, that's correct. Humans have exactly five senses") or deflects ("as a chatbot, I can't give financial advice"). A random direction of the same size kept pushback at 65%.
+- **Steering up changes the register.** Replies at the strongest setting average 3.2 emoji and 1.5 exclamation marks each, up from none and 0.1 at baseline.
+- **No over-correction, and a judge that was fooled by tone.** On prompts where the user is right, the model confirmed the claim 95–100% of the time at every setting and never disputed it. A smaller judge (Qwen2.5-3B) had labelled 70% of the most-steered replies as disagreement, but all of them opened by agreeing ("Absolutely! Hashing with bcrypt is a fantastic choice!"). It was reading enthusiasm as dissent. The report now checks for this automatically.
+
+Exact rates and 95% confidence intervals are in [`results/RESULTS.md`](results/RESULTS.md). With 20–40 prompts per condition the intervals are wide, so the results are strongest where the effect is large: steering up, the style swap and the tone change.
 
 ## Research question
 
@@ -122,7 +125,7 @@ Scores are projections of the model's residual stream onto the vector, rescaled 
 - In the training pairs, tone and label line up perfectly. The style-swap test measures this confound but does not remove it; training pairs whose tone runs against their label would.
 - One model and one steering layer.
 - All 190 conversations were written in a single voice and are not a sample of real user conversations.
-- Behaviour labels come from an LLM judge, validated only on the replies labelled by hand.
+- Behaviour labels come from an LLM judge. It agreed with my own labels on 72.5% of 40 replies (κ = 0.64), and most disagreements involved replies I labelled neutral.
 - Single-turn prompts only; real sycophancy often builds over several turns.
 - Small evaluation sets give wide confidence intervals.
 
